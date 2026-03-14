@@ -1,0 +1,188 @@
+---
+title: "研究一问题3（给领导看图版本）"
+author: "娜孜凯·朱马别克"
+date: "2025年秋"
+geometry: margin=2cm
+documentclass: ctexart
+output:
+  rticles::ctex:
+    number_sections: false
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhead[R]{《多元统计分析》期末项目}
+---
+
+```{r}
+# 数据整理（筛选、生成新变量等）
+library(dplyr)
+# 作图（柱状图、折线图）
+library(ggplot2)
+# 计算边际效应（比直接看回归系数更直观）
+library(marginaleffects)
+# 心理与社会科学常用工具包（这里主要用 PCA）
+library(psych)
+# 回归检验相关（显著性检验）
+library(lmtest)
+# 提供稳健标准误（应对异方差）
+library(sandwich)
+# 另一种计算边际效应的包
+library(margins)
+# 固定随机种子，保证每次运行结果一致（方便复现）
+set.seed(2026)
+# 样本量：150 名学生
+n <- 150
+# 构造原始学生数据
+df_raw <- tibble(
+  # 学生编号
+  student_id = paste0("S", sprintf("%03d", 1:n)),
+  # 抬头率：介于 0.4–0.9 之间（40%–90%）
+  head       = 0.4 + 0.5 * runif(n),
+  # 先验 GPA：2.0–4.0
+  prior_gpa  = runif(n, 2.0, 4.0),
+  # 是否在“睿智教室”（1=是，0=否）
+  is_smart   = rbinom(n, 1, 0.5),
+  # 父母受教育程度（1–5）
+  edu_p      = sample(1:5, n, replace = TRUE),
+  # 家庭收入水平（1–4）
+  inc_f      = sample(1:4, n, replace = TRUE),
+  # 是否理工科
+  is_stem    = rbinom(n, 1, 0.5),
+  # 是否专业必修课
+  is_major   = rbinom(n, 1, 0.8),
+  # 班级规模
+  class_size = sample(30:60, n, replace = TRUE)
+)
+# 对父母教育程度和家庭收入做主成分分析（PCA）
+pca_res <- principal(
+  df_raw %>% select(edu_p, inc_f),
+  nfactors = 1   # 只提取一个综合维度
+)
+# 提取每个学生的“家庭背景得分”
+df_raw$family_background <- as.numeric(pca_res$scores)
+df <- df_raw %>%
+  mutate(
+    # 标准化成绩的生成逻辑：
+    # 1. 抬头率有正向作用
+    # 2. GPA 本身有正向作用
+    # 3. 抬头率 × GPA 存在互补效应（重点！）
+    std = 30 +
+      8  * head +
+      6  * prior_gpa +
+      12 * (head * prior_gpa) +
+      3  * is_smart +
+      2  *is_major+
+      1.2 * family_background -
+      0.04 * class_size +
+      rnorm(n, 0, 3),  # 随机扰动
+    # 成绩上限设为 100
+    std = pmin(std, 100)
+  )
+model <- lm(
+  std ~ head * prior_gpa +   # 核心解释变量（含交互项）
+    is_smart +               # 控制变量
+    family_background +
+    is_stem +
+    is_major +
+    class_size,
+  data = df
+)
+# 计算 HC1 型稳健标准误
+robust <- coeftest(
+  model,
+  vcov = vcovHC(model, type = "HC1")
+)
+# 输出回归结果
+print(robust)
+# 在三个典型 GPA 水平下，计算“抬头率”的边际效应
+me <- margins(
+  model,
+  variables = "head",
+  at = list(prior_gpa = c(2.5, 3.2, 3.8))
+)
+me_df <- summary(me) %>%
+  mutate(
+    # GPA 分组标签（用于画图）
+    gpa_group = factor(
+      prior_gpa,
+      labels = c("低GPA", "中GPA", "高GPA")
+    ),
+    # 因为 head 是 0–1 的比例变量
+    # 乘以 0.1 = 抬头率提高 10 个百分点
+    benefit_10pct = AME * 0.1
+  )
+print(me_df)
+ggplot(me_df, aes(x = gpa_group, y = benefit_10pct, fill = gpa_group)) +
+  
+  # 柱状图：表示成绩提升幅度
+  geom_col(width = 0.55, alpha = 0.85) +
+  
+  # 误差线：置信区间
+  geom_errorbar(
+    aes(ymin = lower * 0.1, ymax = upper * 0.1),
+    width = 0.15
+  ) +
+  
+  # 数值标注
+  geom_text(
+    aes(label = paste0("+", round(benefit_10pct, 2), "分")),
+    vjust = -0.6, size = 5, fontface = "bold"
+  ) +
+  
+  # 手动配色
+  scale_fill_manual(values = c("#BDC3C7", "#5DADE2", "#E74C3C")) +
+  
+  labs(
+    title = "学习基础越好，抬头听讲的回报率越高",
+    subtitle = "抬头率每提高 10%，标准化成绩的平均提升",
+    x = "学生基础水平（GPA）",
+    y = "成绩提升（分）"
+  ) +
+  
+  theme_bw(base_size = 13) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+pred_df <- expand.grid(
+  # 抬头率变化区间
+  head = seq(0.4, 0.9, length.out = 50),
+  # 三个 GPA 水平
+  prior_gpa = c(2.5, 3.2, 3.8),
+  # 其他变量固定在“典型值”
+  is_smart = 0,
+  family_background = 0,
+  is_stem = 0,
+  is_major = 1,
+  class_size = mean(df$class_size)
+)
+pred_df$std_hat <- predict(model, newdata = pred_df)
+pred_df <- pred_df %>%
+  mutate(
+    gpa_group = factor(
+      prior_gpa,
+      labels = c("低GPA", "中GPA", "高GPA")
+    )
+  )
+ggplot(pred_df, aes(x = head, y = std_hat, color = gpa_group)) +
+  
+  # 每条线代表一个 GPA 水平
+  geom_line(linewidth = 1.3) +
+  
+  scale_color_manual(values = c("#BDC3C7", "#5DADE2", "#E74C3C")) +
+  
+  labs(
+    title = "抬头率 × 学习基础：课堂专注的回报并不平均",
+    subtitle = "学习基础越好，抬头率提升带来的成绩增益越大",
+    x = "课堂抬头率",
+    y = "预测标准化成绩",
+    color = "GPA 水平"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```

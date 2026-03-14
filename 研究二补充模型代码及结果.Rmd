@@ -1,0 +1,364 @@
+---
+title: "研究二补充模型及结果"
+author: "娜孜凯·朱马别克"
+date: "2025年秋"
+geometry: margin=2cm
+documentclass: ctexart
+output:
+  rticles::ctex:
+    number_sections: false
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhead[R]{《多元统计分析》期末项目}
+---
+#LPM模型(基准以及含有交互项的两个模型)
+```{r}
+library(dplyr)
+resume = read.csv("D:/桌面/resume.csv")
+# 将所有字符变量转换为因子
+resume <- resume %>%
+  mutate(across(where(is.character), as.factor))
+ resume <- resume %>%
+  mutate(across(where(is.integer), as.numeric))
+#清理有NA缺失值的行
+resume_clean <- na.omit(resume)
+#清理有NA缺失值的列
+resume <- resume %>%
+  select(where(~ !any(is.na(.))))
+model_lpm1 = lm(as.numeric(reply) ~.-ID, , data = resume)
+summary(model_lpm1)
+model_lpm2 = lm(as.numeric(reply) ~.-ID + cicc*a10, , data = resume_clean)
+summary(model_lpm2)
+```
+##Logit模型（所有变量+含交互项的两个模型）
+```{r}
+ model_logit1 = glm(reply ~.-ID , family = "binomial", data = resume)
+ summary (model_logit1)
+ model_logit2 = glm(reply ~.-ID+ cicc*a10, family = "binomial", data = resume_clean)
+summary (model_logit2)
+
+
+```
+##预测小焦求职命运(LPM模型)
+```{r}
+# 提取 LPM（线性概率模型）的回归系数向量 β̂
+beta_hat <- coef(model_lpm2)
+
+# 构造“小焦”的个体特征向量 X
+# 各变量取值含义如下：
+# gendermale = 0：女性
+# qualitylow = 1：简历质量较低
+# experience = 11：11 年工作经验
+# ciccyes = 0：未通过 CICC
+# mvsayes = 0：未上过《多元统计分析》
+# internyes = 0：无实习经历
+# nonqqyes = 0：未使用非 QQ 邮箱
+# cfayes = 1：通过 CFA
+# a10yes = 0：非 A10 家庭背景
+# college_985yes = 1：985 院校
+# honoryes = 0：无荣誉称号
+# reqexpyes = 1：岗位要求工作经验
+# reqeducyes = 0：岗位无学历硬性要求
+# reqcfayes = 1：岗位明确要求 CFA
+# req996yes = 0：岗位未标注 996
+# ciccyes:a10yes = 0：未同时具备 CICC 与 A10 背景
+
+x_xiao_jiao <- c(
+  `(Intercept)` = 1,
+  gendermale = 0,
+  qualitylow = 1,
+  experience = 11,
+  ciccyes = 0,
+  mvsayes = 0,
+  internyes = 0,
+  nonqqyes = 0,
+  cfayes = 1,
+  a10yes = 0,
+  college_985yes = 1,
+  honoryes = 0,
+  reqexpyes = 1,
+  reqeducyes = 0,
+  reqcfayes = 1,
+  req996yes = 0,
+  `ciccyes:a10yes` = 0
+)
+
+# 按照回归系数的顺序对特征向量重新排序，
+# 确保 X 与 β̂ 在元素上一一对应
+x_xiao_jiao <- x_xiao_jiao[names(beta_hat)]
+
+# 计算点预测值：P̂(Y=1|X) = Xβ̂
+# 在 LPM 中，该值可直接解释为获得 HR 回复的预测概率
+pred_prob <- sum(x_xiao_jiao * beta_hat)
+cat("小焦获得 HR 回复的预测概率为:", pred_prob, "\n")
+
+# 提取模型的协方差矩阵，用于计算预测不确定性
+vcov_matrix <- vcov(model_lpm2)
+
+# 提取残差方差，用于构造预测区间
+sigma_sq <- summary(model_lpm2)$sigma^2
+
+# 提取自由度并计算 95% 置信水平下的 t 临界值
+df <- summary(model_lpm2)$df[2]
+t_crit <- qt(0.975, df)
+
+# 计算预测值的标准误
+# 第一项反映参数估计误差，第二项反映个体层面的随机扰动
+se_fit_sq <- t(x_xiao_jiao) %*% vcov_matrix %*% x_xiao_jiao
+se_pred <- sqrt(se_fit_sq + sigma_sq)
+
+# 构造 95% 预测区间
+lower_bound <- pred_prob - t_crit * se_pred
+upper_bound <- pred_prob + t_crit * se_pred
+
+cat("95%预测区间为: [", lower_bound, ",", upper_bound, "]\n")
+
+```
+
+## 预测小焦求职命运(logit模型)
+```{r}
+## 1. 提取 Logit 模型的估计系数 β̂
+## beta_hat 是一个以变量名为索引的向量
+beta_hat <- coef(model_logit2)
+
+## 2. 构造小焦同学的特征向量 X
+## 注意：变量名必须与 beta_hat 完全一致
+## 因子变量在 glm() 中会被自动展开为虚拟变量（如 qualitylow）
+x_xiao_jiao <- c(
+  `(Intercept)` = 1,      # 截距项
+  `gendermale` = 0,       # 性别：女性
+  `qualitylow` = 1,       # 简历质量：低
+  `experience` = 11,     # 工作年限
+  `ciccyes` = 0,          # 是否有 CICC 经历
+  `mvsayes` = 0,          # 是否上过多元统计分析课程
+  `internyes` = 0,        # 是否有实习经历
+  `nonqqyes` = 0,         # 是否非 QQ 简历
+  `cfayes` = 1,           # 是否通过 CFA
+  `a10yes` = 0,           # 是否来自 A10 家庭
+  `college_985yes` = 1,   # 是否 985 院校
+  `honoryes` = 0,         # 是否有荣誉称号
+  `reqexpyes` = 1,        # 岗位是否要求经验
+  `reqeducyes` = 0,       # 岗位是否要求学历
+  `reqcfayes` = 1,        # 岗位是否要求 CFA
+  `req996yes` = 0,        # 岗位是否 996
+  `ciccyes:a10yes` = 0    # 交互项：CICC × A10
+)
+
+## 强制按照 beta_hat 的顺序排列特征向量
+## 避免因顺序错位导致 Xβ 计算错误
+x_xiao_jiao <- x_xiao_jiao[names(beta_hat)]
+
+## 3. 计算线性预测值 η = Xβ
+## η 为 log-odds（对数胜算），不是概率
+eta_hat <- sum(x_xiao_jiao * beta_hat)
+
+## 4. 通过 logistic 函数将 log-odds 映射为概率
+## P(Y=1|X) = 1 / (1 + exp(-η))
+pred_prob <- 1 / (1 + exp(-eta_hat))
+cat("小焦获得 HR 回复的预测概率为:", pred_prob, "\n")
+
+## 5. 构造 95% 预测区间（基于正态近似）
+## 5.1 提取系数的协方差矩阵 Var(β̂)
+vcov_matrix <- vcov(model_logit2)
+## 5.2 计算线性预测值 η 的标准误
+## Var(η) = X' Var(β̂) X
+se_eta <- sqrt(
+  as.numeric(t(x_xiao_jiao) %*% vcov_matrix %*% x_xiao_jiao)
+)
+## 5.3 构造 η 的 95% 区间（正态近似）
+z_crit <- qnorm(0.975)
+eta_lower <- eta_hat - z_crit * se_eta
+eta_upper <- eta_hat + z_crit * se_eta
+## 5.4 将 log-odds 区间映射回概率区间
+## Logit 模型的优势：预测区间严格落在 [0,1]
+lower_prob <- 1 / (1 + exp(-eta_lower))
+upper_prob <- 1 / (1 + exp(-eta_upper))
+cat("95%预测区间为: [", lower_prob, ",", upper_prob, "]\n")
+```
+## 补充的模型
+```{r}
+# 加载所需包
+library(dplyr)
+library(modelsummary)
+library(marginaleffects)
+library(ggplot2)
+library(gridExtra)
+
+# 将简历中的离散变量统一转为因子，便于交互项解释
+resume_clean <- resume %>%
+  mutate(
+    gender_f = factor(gender, labels = c("Female", "Male")),
+    quality_f = factor(quality, labels = c("Low", "High")),
+    cicc_f = factor(cicc, labels = c("NoCICC", "CICC")),
+    mvsa_f = factor(mvsa, labels = c("NoMVSA", "MVSA")),
+    intern_f = factor(intern, labels = c("NoIntern", "Intern")),
+    nonqq_f = factor(nonqq, labels = c("NoNonQQ", "NonQQ")),
+    cfayes_f = factor(cfa, labels = c("NoCFA", "CFA")),
+    a10_f = factor(a10, labels = c("NonA10", "A10")),
+    college_985_f = factor(college_985, labels = c("Non985", "985")),
+    honor_f = factor(honor, labels = c("NoHonor", "Honor")),
+    reply_f = factor(reply, labels = c("No", "Yes"))
+  )
+
+# 模型1：CFA × 院校类型（检验是否存在“背景补偿效应”）
+model_cfa_college <- glm(
+  reply_f ~ experience + gender_f + quality_f +
+    cfayes_f * college_985_f + a10_f + intern_f + nonqq_f + honor_f,
+  data = resume_clean,
+  family = binomial(link = "logit")
+)
+
+# 模型2：CFA × 简历质量（检验CFA是否弥补低质量简历）
+model_cfa_quality <- glm(
+  reply_f ~ experience + gender_f + quality_f +
+    cfayes_f * quality_f + a10_f + intern_f + nonqq_f + honor_f + college_985_f,
+  data = resume_clean,
+  family = binomial(link = "logit")
+)
+
+# 模型3：CFA × 工作经验（检验CFA是否对低经验者更重要）
+model_cfa_experience <- glm(
+  reply_f ~ experience + gender_f + quality_f +
+    cfayes_f * experience + a10_f + intern_f + nonqq_f + honor_f + college_985_f,
+  data = resume_clean,
+  family = binomial(link = "logit")
+)
+
+# 模型4：CFA × MVSA课程（检验证书与课程信号是否存在替代关系）
+model_cfa_mvsa <- glm(
+  reply_f ~ experience + gender_f + quality_f + 
+    cfayes_f * mvsa_f + a10_f + intern_f + nonqq_f + honor_f + college_985_f,
+  data = resume_clean,
+  family = binomial(link = "logit")
+)
+
+# 汇总所有模型，便于统一展示
+models_list <- list(
+  "Model 1: 院校交互" = model_cfa_college,
+  "Model 2: 质量交互" = model_cfa_quality,
+  "Model 3: 经验交互" = model_cfa_experience,
+  "Model 4: 课程交互" = model_cfa_mvsa
+)
+
+# 回归结果表（控制台预览）
+modelsummary(
+  models_list,
+  output = "markdown",
+  stars = TRUE,
+  coef_rename = c(
+    "cfayes_fCFA" = "CFA证书",
+    "college_985_f985" = "985院校"
+  ),
+  gof_omit = "IC|Log.Lik|F",
+  title = "CFA证书对简历回复率影响的交互效应分析"
+)
+
+# CFA × 院校：分别计算985与非985下，CFA的平均边际效应
+mfx_college <- avg_comparisons(
+  model_cfa_college,
+  variables = "cfayes_f",
+  by = "college_985_f"
+)
+print(mfx_college)
+
+# CFA × 简历质量：比较高低质量简历中，CFA的作用差异
+mfx_quality <- avg_comparisons(
+  model_cfa_quality,
+  variables = "cfayes_f",
+  by = "quality_f"
+)
+print(mfx_quality)
+
+# CFA × 工作经验：在不同经验水平下计算CFA的边际效应
+experience_vals <- c(0, 5, 10, 15)
+
+newdata <- expand.grid(
+  experience = experience_vals,
+  cfayes_f = c("NoCFA", "CFA"),
+  gender_f = "Female",
+  quality_f = "Low",
+  a10_f = "NonA10",
+  intern_f = "NoIntern",
+  nonqq_f = "NoNonQQ",
+  honor_f = "NoHonor",
+  college_985_f = "Non985"
+)
+
+mfx_experience <- avg_comparisons(
+  model_cfa_experience,
+  variables = "cfayes_f",
+  newdata = newdata
+)
+print(mfx_experience)
+
+# CFA × MVSA：在是否上过MVSA课程的情况下比较CFA的预测效果
+mfx_mvsa_cfa <- avg_predictions(
+  model_cfa_mvsa,
+  variables = "cfayes_f",
+  by = "mvsa_f"
+)
+print(mfx_mvsa_cfa)
+
+# 可视化：模型1（CFA × 院校）
+plot_college <- plot_comparisons(
+  model_cfa_college,
+  variables = "cfayes_f",
+  by = "college_985_f"
+) +
+  labs(title = "CFA × 院校：CFA对回复概率的影响")
+print(plot_college)
+
+# 可视化：模型2（CFA × 简历质量）
+plot_quality <- plot_comparisons(
+  model_cfa_quality,
+  variables = "cfayes_f",
+  by = "quality_f"
+) +
+  labs(title = "CFA × 简历质量：CFA对回复概率的影响")
+print(plot_quality)
+
+# 可视化：模型3（CFA × 工作经验）
+pred_data <- expand.grid(
+  experience = seq(0, 15, 0.5),
+  cfayes_f = c("NoCFA", "CFA"),
+  gender_f = "Female",
+  quality_f = "Low",
+  college_985_f = "Non985",
+  a10_f = "NonA10",
+  intern_f = "NoIntern",
+  nonqq_f = "NoNonQQ",
+  honor_f = "NoHonor"
+)
+
+pred_data$pred <- predict(
+  model_cfa_experience,
+  newdata = pred_data,
+  type = "response"
+)
+
+plot_experience <- ggplot(
+  pred_data,
+  aes(x = experience, y = pred, color = cfayes_f)
+) +
+  geom_line(linewidth = 1.2) +
+  labs(
+    title = "CFA × 工作经验：CFA效应随经验变化",
+    x = "工作经验（年）",
+    y = "预测回复概率",
+    color = "是否持有CFA"
+  ) +
+  theme_bw()
+print(plot_experience)
+
+# 可视化：模型4（CFA × MVSA）
+plot_mvsa_cfa <- plot_predictions(
+  model_cfa_mvsa,
+  variables = "cfayes_f",
+  by = "mvsa_f"
+) +
+  labs(title = "CFA × MVSA课程：证书与课程信号的交互影响")
+print(plot_mvsa_cfa)
+
+```
+
